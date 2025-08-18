@@ -18,7 +18,8 @@ export default async function handler(req, res) {
         res.status(500).json({ error: "No image URL returned from Replicate." });
       }
     } catch (e) {
-      res.status(500).json({ error: e.message });
+      console.error("Replicate error:", e);    // <-- This line!
+      res.status(500).json({ error: e.message || "Image generation failed" });
     }
   } else {
     res.status(405).json({ error: "Method not allowed" });
