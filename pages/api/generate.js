@@ -33,92 +33,78 @@ export default async function handler(req, res) {
     // Enhanced prompt for wallpaper generation
     const enhancedPrompt = `${prompt}, high resolution desktop wallpaper, professional photography, stunning composition, 8k quality, desktop background`;
 
-    let apiOutput;
-    let model = "Flux Schnell";
-    
-    // Try Flux first, fallback to Qwen if needed
-    try {
-      const fluxInput = {
-        prompt: enhancedPrompt,
-        num_inference_steps: Math.min(steps || 4, 8),
-        width: 1024,
-        height: 768
-      };
-      console.log('Trying Flux model with input:', fluxInput);
-      apiOutput = await replicate.run("black-forest-labs/flux-schnell", { input: fluxInput });
-      console.log('Flux output:', JSON.stringify(apiOutput, null, 2));
-    } catch (fluxError) {
-      console.log('Flux failed, trying Qwen model:', fluxError.message);
-      const qwenInput = {
-        prompt: enhancedPrompt,
-        num_inference_steps: steps || 50,
-        guidance_scale: 7.5,
-        width: 2560,
-        height: 1440
-      };
-      apiOutput = await replicate.run("qwen/qwen-image", { input: qwenInput });
-      model = "Qwen Image AI";
-      console.log('Qwen output:', JSON.stringify(apiOutput, null, 2));
-    }
-    
-    // Extract image URL from response - handle multiple formats
-    let imageUrl;
-    
-    if (Array.isArray(apiOutput)) {
-      if (apiOutput.length > 0) {
-        // If first element is a string URL
-        if (typeof apiOutput[0] === 'string') {
-          imageUrl = apiOutput[0];
-        }
-        // If first element is an object with url property
-        else if (apiOutput[0] && typeof apiOutput[0] === 'object') {
-          imageUrl = apiOutput[0].url || apiOutput[0].image_url || apiOutput[0].imageUrl;
-          // Handle File objects from Replicate
-          if (typeof imageUrl === 'object' && imageUrl.url) {
-            imageUrl = imageUrl.url;
-          }
-        }
-      }
-    }
-    // If output is directly a string
-    else if (typeof apiOutput === 'string') {
-      imageUrl = apiOutput;
-    }
-    // If output is an object
-    else if (apiOutput && typeof apiOutput === 'object') {
-      imageUrl = apiOutput.url || apiOutput.image_url || apiOutput.imageUrl;
-      // Handle File objects
-      if (typeof imageUrl === 'object' && imageUrl.url) {
-        imageUrl = imageUrl.url;
-      }
-    }
+    // Use exact parameters from Qwen documentation
+    const input = {
+      prompt: enhancedPrompt,
+      aspect_ratio: "16:9",
+      num_inference_steps: Math.min(Math.max(steps || 30, 28), 50), // 28-50 range
+      guidance: 3.5,
+      go_fast: true,
+      output_format: "webp",
+      output_quality: 90,
+      enhance_prompt: true
+    };
 
-    console.log('Final extracted imageUrl:', imageUrl);
-    console.log('imageUrl type:', typeof imageUrl);
-
-    if (!imageUrl || typeof imageUrl !== 'string') {
-      console.error('No valid image URL found in output. Raw output:', apiOutput);
-      return res.status(500).json({ 
-        error: 'Failed to extract image URL from response',
-        debug: process.env.NODE_ENV === 'development' ? { 
-          rawOutput: apiOutput,
+    console.log('Calling Qwen with input:', input);
+    
+    // Call the API and wait for completion
+    const output = await replicate.run("qwen/qwen-image", {
+      input: input
+    });
+    
+    console.log('Raw output type:', typeof output);
+    console.log('Raw output:', output);
+    console.log('Is array:', Array.isArray(output));
+    
+    // Extract the image URL - Qwen returns array of strings
+    let imageUrl = null;
+    
+    if (Array.isArray(output) && output.length > 0) {
+      imageUrl = output[0];
+      console.log('Extracted from array:', imageUrl, 'type:', typeof imageUrl);
+    } else if (typeof output === 'string') {
+      imageUrl = output;
+      console.log('Direct string:', imageUrl);
+    }
+    
+    // Validate the URL
+    if (!imageUrl || typeof imageUrl !== 'string' || !imageUrl.startsWith('http')) {
+      console.error('Invalid image URL extracted:', imageUrl);
+      return res.status(500).json({
+        error: 'Failed to get valid image URL',
+        debug: {
+          output: output,
           extractedUrl: imageUrl,
           urlType: typeof imageUrl
-        } : undefined
+        }
       });
     }
 
-    res.status(200).json({
+    console.log('SUCCESS - Image URL:', imageUrl);
+
+    return res.status(200).json({
       image_url: imageUrl,
-      model: model,
+      model: "Qwen Image AI",
       generation_time: Date.now()
     });
 
   } catch (error) {
-    console.error('Generation error:', error);
-    res.status(500).json({ 
-      error: `Generation failed: ${error.message}`,
-      debug: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    console.error('API Error:', error);
+    console.error('Error stack:', error.stack);
+    
+    let errorMessage = 'Generation failed';
+    if (error.message?.includes('credits')) {
+      errorMessage = 'Insufficient Replicate credits';
+    } else if (error.message?.includes('rate')) {
+      errorMessage = 'Rate limit exceeded';
+    } else if (error.message?.includes('token')) {
+      errorMessage = 'Invalid API token';
+    }
+    
+    return res.status(500).json({
+      error: errorMessage,
+      details: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 }
