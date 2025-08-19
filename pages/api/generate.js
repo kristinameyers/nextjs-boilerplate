@@ -1,4 +1,4 @@
-// pages/api/generate.js - Final fix for URL extraction
+// pages/api/generate.js - Simple debug version to check Replicate connection
 import Replicate from "replicate";
 
 export default async function handler(req, res) {
@@ -22,90 +22,108 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Prompt is required" });
     }
     
+    // Check if token exists
     if (!process.env.REPLICATE_API_TOKEN) {
-      return res.status(500).json({ error: 'Replicate API token not configured' });
+      return res.status(500).json({ error: 'Replicate API token not configured in Vercel environment variables' });
+    }
+    
+    // Test token format
+    const token = process.env.REPLICATE_API_TOKEN;
+    if (!token.startsWith('r8_')) {
+      return res.status(500).json({ error: 'Invalid Replicate API token format (should start with r8_)' });
     }
     
     const replicate = new Replicate({
-      auth: process.env.REPLICATE_API_TOKEN
+      auth: token
     });
     
-    const startTime = Date.now();
+    console.log('Token configured:', token.substring(0, 10) + '...');
     
+    // Try a simple working model first to test connection
+    try {
+      console.log('Testing Replicate connection...');
+      const testOutput = await replicate.run("hello-world", { 
+        input: { text: "test" },
+        stream: false 
+      });
+      console.log('Connection test successful:', testOutput);
+    } catch (testError) {
+      console.error('Connection test failed:', testError.message);
+      return res.status(500).json({ 
+        error: 'Replicate connection failed: ' + testError.message,
+        tokenCheck: 'Token exists and has correct format'
+      });
+    }
+    
+    // Now try the actual image generation
     const input = {
       prompt: prompt,
-      num_inference_steps: steps || 50,
+      num_inference_steps: Math.min(steps || 28, 50),
       guidance_scale: 7.5,
       width: 2560,
       height: 1440
     };
 
-    console.log('Calling Qwen with streaming disabled...');
+    console.log('Calling qwen/qwen-image with input:', input);
     
     const output = await replicate.run("qwen/qwen-image", { 
       input,
       stream: false
     });
     
-    console.log('Raw output:', JSON.stringify(output, null, 2));
-    
-    const generationTime = Date.now() - startTime;
-    
-    // More robust URL extraction
-    let imageUrl;
+    console.log('Raw Qwen output:', JSON.stringify(output, null, 2));
+    console.log('Output type:', typeof output);
+    console.log('Is array:', Array.isArray(output));
     
     if (Array.isArray(output) && output.length > 0) {
-      const firstItem = output[0];
-      
-      // If it's a string, use it directly
-      if (typeof firstItem === 'string') {
-        imageUrl = firstItem;
-      }
-      // If it's an object, extract URL property
-      else if (firstItem && typeof firstItem === 'object') {
-        // Try different URL property names
-        imageUrl = firstItem.url || firstItem.image_url || firstItem.imageUrl;
-        
-        // If URL is still an object (File-like), get its string representation
-        if (imageUrl && typeof imageUrl === 'object') {
-          imageUrl = imageUrl.toString() || imageUrl.href || imageUrl.url;
-        }
-      }
+      console.log('First element:', output[0]);
+      console.log('First element type:', typeof output[0]);
+      console.log('First element keys:', typeof output[0] === 'object' ? Object.keys(output[0]) : 'N/A');
     }
     
-    // Convert to string if it's not already
-    if (imageUrl && typeof imageUrl !== 'string') {
-      imageUrl = String(imageUrl);
-    }
-    
-    console.log('Final extracted URL:', imageUrl, 'Type:', typeof imageUrl);
-    
-    // Validate the final URL
-    if (!imageUrl || typeof imageUrl !== 'string' || !imageUrl.startsWith('http')) {
-      console.error("Failed to extract valid URL");
+    // If we get empty object, it's likely a credits/API issue
+    if (Array.isArray(output) && output.length === 1 && 
+        typeof output[0] === 'object' && Object.keys(output[0]).length === 0) {
       return res.status(500).json({ 
-        error: "Failed to extract valid image URL",
+        error: 'Replicate returned empty object - likely insufficient credits or model access issue',
         debug: {
           output: output,
-          extractedUrl: imageUrl,
-          urlType: typeof imageUrl
+          suggestion: 'Check your Replicate account credits and billing at replicate.com'
+        }
+      });
+    }
+    
+    // Try to extract URL
+    let imageUrl;
+    if (Array.isArray(output) && output.length > 0 && typeof output[0] === 'string') {
+      imageUrl = output[0];
+    }
+    
+    if (!imageUrl) {
+      return res.status(500).json({ 
+        error: 'No valid image URL in response',
+        debug: {
+          output: output,
+          outputType: typeof output,
+          isArray: Array.isArray(output),
+          length: Array.isArray(output) ? output.length : 'N/A'
         }
       });
     }
 
-    console.log('SUCCESS - Returning image URL:', imageUrl);
-
     return res.status(200).json({ 
       image_url: imageUrl,
-      generation_time: generationTime,
-      model: "Qwen Image AI"
+      generation_time: Date.now(),
+      model: "Qwen Image AI",
+      debug: 'Success'
     });
 
   } catch (error) {
     console.error("Generation error:", error);
     return res.status(500).json({ 
       error: error.message,
-      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      errorType: error.name,
+      details: error.stack
     });
   }
 }
