@@ -1,4 +1,4 @@
-// pages/api/generate.js
+// pages/api/generate.js - Exact copy of working local server logic
 import Replicate from "replicate";
 
 export default async function handler(req, res) {
@@ -19,91 +19,82 @@ export default async function handler(req, res) {
     const { prompt, steps } = req.body;
     
     if (!prompt) {
-      return res.status(400).json({ error: 'Prompt is required' });
+      return res.status(400).json({ error: "Prompt is required" });
     }
-
+    
     if (!process.env.REPLICATE_API_TOKEN) {
       return res.status(500).json({ error: 'Replicate API token not configured' });
     }
-
+    
     const replicate = new Replicate({
-      auth: process.env.REPLICATE_API_TOKEN,
+      auth: process.env.REPLICATE_API_TOKEN
     });
-
-    // Enhanced prompt for wallpaper generation
-    const enhancedPrompt = `${prompt}, high resolution desktop wallpaper, professional photography, stunning composition, 8k quality, desktop background`;
-
-    // Use exact parameters from Qwen documentation
+    
+    const startTime = Date.now();
+    
+    // Use EXACT same input as working local server
     const input = {
-      prompt: enhancedPrompt,
-      aspect_ratio: "16:9",
-      num_inference_steps: Math.min(Math.max(steps || 30, 28), 50), // 28-50 range
-      guidance: 3.5,
-      go_fast: true,
-      output_format: "webp",
-      output_quality: 90,
-      enhance_prompt: true
+      prompt: prompt,
+      num_inference_steps: steps || 50,
+      guidance_scale: 7.5,
+      width: 2560,
+      height: 1440
     };
 
-    console.log('Calling Qwen with input:', input);
+    console.log('Vercel calling Qwen with input:', input);
+    console.log('Token configured:', !!process.env.REPLICATE_API_TOKEN);
     
-    // Call the API and wait for completion
-    const output = await replicate.run("qwen/qwen-image", {
-      input: input
-    });
+    const output = await replicate.run("qwen/qwen-image", { input });
     
-    console.log('Raw output type:', typeof output);
-    console.log('Raw output:', output);
-    console.log('Is array:', Array.isArray(output));
+    console.log('Vercel raw output:', JSON.stringify(output, null, 2));
+    console.log('Output type:', typeof output, 'Array:', Array.isArray(output));
     
-    // Extract the image URL - Qwen returns array of strings
-    let imageUrl = null;
+    const generationTime = Date.now() - startTime;
     
-    if (Array.isArray(output) && output.length > 0) {
+    // Extract image URL using EXACT same logic as local server
+    let imageUrl;
+    if (typeof output[0] === 'string') {
       imageUrl = output[0];
-      console.log('Extracted from array:', imageUrl, 'type:', typeof imageUrl);
-    } else if (typeof output === 'string') {
-      imageUrl = output;
-      console.log('Direct string:', imageUrl);
-    }
-    
-    // Validate the URL
-    if (!imageUrl || typeof imageUrl !== 'string' || !imageUrl.startsWith('http')) {
-      console.error('Invalid image URL extracted:', imageUrl);
-      return res.status(500).json({
-        error: 'Failed to get valid image URL',
+      console.log('Extracted as string:', imageUrl);
+    } else if (output[0] && typeof output[0] === 'object' && 'url' in output[0]) {
+      imageUrl = typeof output[0].url === 'function' ? output[0].url() : output[0].url;
+      console.log('Extracted from object.url:', imageUrl);
+    } else {
+      console.error("Vercel: No image URL found in response:", output);
+      return res.status(500).json({ 
+        error: "No image generated",
         debug: {
           output: output,
-          extractedUrl: imageUrl,
-          urlType: typeof imageUrl
+          outputType: typeof output,
+          isArray: Array.isArray(output),
+          firstElement: output[0],
+          firstElementType: typeof output[0]
+        }
+      });
+    }
+    
+    if (!imageUrl) {
+      return res.status(500).json({ 
+        error: "No image generated",
+        debug: {
+          output: output,
+          extractedUrl: imageUrl
         }
       });
     }
 
-    console.log('SUCCESS - Image URL:', imageUrl);
+    console.log('Vercel SUCCESS:', imageUrl);
 
-    return res.status(200).json({
+    res.json({ 
       image_url: imageUrl,
-      model: "Qwen Image AI",
-      generation_time: Date.now()
+      generation_time: generationTime,
+      model: "Qwen Image AI"
     });
 
   } catch (error) {
-    console.error('API Error:', error);
-    console.error('Error stack:', error.stack);
-    
-    let errorMessage = 'Generation failed';
-    if (error.message?.includes('credits')) {
-      errorMessage = 'Insufficient Replicate credits';
-    } else if (error.message?.includes('rate')) {
-      errorMessage = 'Rate limit exceeded';
-    } else if (error.message?.includes('token')) {
-      errorMessage = 'Invalid API token';
-    }
-    
-    return res.status(500).json({
-      error: errorMessage,
-      details: error.message,
+    console.error("Vercel image generation error:", error);
+    res.status(500).json({ 
+      error: error.message,
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
