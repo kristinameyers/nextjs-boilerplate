@@ -1,61 +1,52 @@
-// pages/api/generate.js - Simple debug version to check Replicate connection
+// pages/api/generate.js - Enhanced CORS and debugging version
 import Replicate from "replicate";
 
 export default async function handler(req, res) {
-  // Enable CORS for WordPress
+  // Set CORS headers IMMEDIATELY - before any other logic
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.setHeader('Content-Type', 'application/json');
   
+  // Handle OPTIONS preflight
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    console.log('OPTIONS preflight request received');
+    res.status(200).end();
+    return;
   }
 
+  // Only allow POST
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    console.log('Invalid method:', req.method);
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
   }
+
+  console.log('=== GENERATE API CALLED ===');
+  console.log('Headers:', req.headers);
+  console.log('Body:', req.body);
 
   try {
     const { prompt, steps } = req.body;
     
     if (!prompt) {
-      return res.status(400).json({ error: "Prompt is required" });
+      console.log('Missing prompt');
+      res.status(400).json({ error: "Prompt is required" });
+      return;
     }
     
-    // Check if token exists
     if (!process.env.REPLICATE_API_TOKEN) {
-      return res.status(500).json({ error: 'Replicate API token not configured in Vercel environment variables' });
-    }
-    
-    // Test token format
-    const token = process.env.REPLICATE_API_TOKEN;
-    if (!token.startsWith('r8_')) {
-      return res.status(500).json({ error: 'Invalid Replicate API token format (should start with r8_)' });
+      console.log('Missing Replicate token');
+      res.status(500).json({ error: 'Replicate API token not configured' });
+      return;
     }
     
     const replicate = new Replicate({
-      auth: token
+      auth: process.env.REPLICATE_API_TOKEN
     });
     
-    console.log('Token configured:', token.substring(0, 10) + '...');
+    const startTime = Date.now();
     
-    // Try a simple working model first to test connection
-    try {
-      console.log('Testing Replicate connection...');
-      const testOutput = await replicate.run("hello-world", { 
-        input: { text: "test" },
-        stream: false 
-      });
-      console.log('Connection test successful:', testOutput);
-    } catch (testError) {
-      console.error('Connection test failed:', testError.message);
-      return res.status(500).json({ 
-        error: 'Replicate connection failed: ' + testError.message,
-        tokenCheck: 'Token exists and has correct format'
-      });
-    }
-    
-    // Now try the actual image generation
     const input = {
       prompt: prompt,
       num_inference_steps: Math.min(steps || 28, 50),
@@ -64,43 +55,43 @@ export default async function handler(req, res) {
       height: 1440
     };
 
-    console.log('Calling qwen/qwen-image with input:', input);
+    console.log('Calling Replicate with input:', input);
     
     const output = await replicate.run("qwen/qwen-image", { 
       input,
       stream: false
     });
     
-    console.log('Raw Qwen output:', JSON.stringify(output, null, 2));
-    console.log('Output type:', typeof output);
-    console.log('Is array:', Array.isArray(output));
+    console.log('Replicate raw output:', JSON.stringify(output, null, 2));
     
-    if (Array.isArray(output) && output.length > 0) {
-      console.log('First element:', output[0]);
-      console.log('First element type:', typeof output[0]);
-      console.log('First element keys:', typeof output[0] === 'object' ? Object.keys(output[0]) : 'N/A');
-    }
+    const generationTime = Date.now() - startTime;
     
-    // If we get empty object, it's likely a credits/API issue
+    // Handle empty response (credits issue)
     if (Array.isArray(output) && output.length === 1 && 
         typeof output[0] === 'object' && Object.keys(output[0]).length === 0) {
-      return res.status(500).json({ 
-        error: 'Replicate returned empty object - likely insufficient credits or model access issue',
+      console.log('Empty object response - likely credits issue');
+      const errorResponse = { 
+        error: 'Replicate returned empty object - check your account credits',
         debug: {
           output: output,
-          suggestion: 'Check your Replicate account credits and billing at replicate.com'
+          suggestion: 'Visit replicate.com to check credits and billing'
         }
-      });
+      };
+      res.status(500).json(errorResponse);
+      return;
     }
     
-    // Try to extract URL
+    // Try to extract URL from response
     let imageUrl;
-    if (Array.isArray(output) && output.length > 0 && typeof output[0] === 'string') {
-      imageUrl = output[0];
+    if (Array.isArray(output) && output.length > 0) {
+      if (typeof output[0] === 'string') {
+        imageUrl = output[0];
+      }
     }
     
     if (!imageUrl) {
-      return res.status(500).json({ 
+      console.log('No valid URL found in response');
+      const errorResponse = {
         error: 'No valid image URL in response',
         debug: {
           output: output,
@@ -108,22 +99,27 @@ export default async function handler(req, res) {
           isArray: Array.isArray(output),
           length: Array.isArray(output) ? output.length : 'N/A'
         }
-      });
+      };
+      res.status(500).json(errorResponse);
+      return;
     }
 
-    return res.status(200).json({ 
+    const successResponse = { 
       image_url: imageUrl,
-      generation_time: Date.now(),
-      model: "Qwen Image AI",
-      debug: 'Success'
-    });
+      generation_time: generationTime,
+      model: "Qwen Image AI"
+    };
+    
+    console.log('SUCCESS - Sending response:', successResponse);
+    res.status(200).json(successResponse);
 
   } catch (error) {
-    console.error("Generation error:", error);
-    return res.status(500).json({ 
+    console.error("API Error:", error);
+    const errorResponse = { 
       error: error.message,
-      errorType: error.name,
-      details: error.stack
-    });
+      type: error.name,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    };
+    res.status(500).json(errorResponse);
   }
 }
