@@ -86,6 +86,10 @@ export default async function handler(req, res) {
     console.log('Output type:', typeof output);
     console.log('Is array:', Array.isArray(output));
     console.log('Output length:', Array.isArray(output) ? output.length : 'N/A');
+
+    console.log('Received req.body:', req.body);
+    // Before calling Replicate
+    console.log('Prepared input for Replicate:', input);
     
     if (Array.isArray(output) && output.length > 0) {
       console.log('First element:', output[0]);
