@@ -1,30 +1,19 @@
-// pages/api/generate.js - Minimal working version 
+// pages/api/generate.js - Debug version to identify Replicate issue
 import Replicate from "replicate";
 
 export default async function handler(req, res) {
-  // Set all CORS headers first
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
   res.setHeader('Content-Type', 'application/json');
   
-  console.log('=== API REQUEST ===');
-  console.log('Method:', req.method);
-  console.log('URL:', req.url);
-  console.log('Headers:', JSON.stringify(req.headers, null, 2));
-  console.log('Body:', req.body);
-  
-  // Handle OPTIONS preflight
   if (req.method === 'OPTIONS') {
-    console.log('Handling OPTIONS request');
     res.status(200).end();
     return;
   }
 
-  // Only allow POST
   if (req.method !== 'POST') {
-    console.log('Method not allowed:', req.method);
-    res.status(405).json({ error: 'Method not allowed', received_method: req.method });
+    res.status(405).json({ error: 'Method not allowed' });
     return;
   }
 
@@ -32,88 +21,151 @@ export default async function handler(req, res) {
     const { prompt, steps } = req.body || {};
     
     if (!prompt) {
-      console.log('Missing prompt in body:', req.body);
-      res.status(400).json({ error: "Prompt is required", received_body: req.body });
+      res.status(400).json({ error: "Prompt is required" });
       return;
     }
     
-    if (!process.env.REPLICATE_API_TOKEN) {
-      console.log('Missing Replicate token');
+    const token = process.env.REPLICATE_API_TOKEN;
+    if (!token) {
       res.status(500).json({ error: 'Replicate API token not configured' });
       return;
     }
     
-    const replicate = new Replicate({
-      auth: process.env.REPLICATE_API_TOKEN
+    // Debug token format
+    console.log('Token format check:', {
+      hasToken: !!token,
+      startsWithR8: token?.startsWith('r8_'),
+      tokenLength: token?.length,
+      tokenPreview: token?.substring(0, 8) + '...'
     });
     
-    console.log('Starting image generation...');
-    const startTime = Date.now();
+    const replicate = new Replicate({ auth: token });
     
+    // Test with a simpler, known working model first
+    console.log('Testing with hello-world model...');
+    try {
+      const testResult = await replicate.run("stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b", {
+        input: { prompt: "test" },
+        stream: false
+      });
+      console.log('SDXL test result:', testResult);
+    } catch (testError) {
+      console.log('SDXL test failed:', testError.message);
+    }
+    
+    // Now try the original qwen model
     const input = {
       prompt: prompt,
-      num_inference_steps: Math.min(steps || 28, 50),
+      num_inference_steps: Math.min(steps || 20, 28),
       guidance_scale: 7.5,
       width: 2560,
       height: 1440
     };
 
-    const output = await replicate.run("qwen/qwen-image", { 
-      input,
-      stream: false
-    });
+    console.log('Calling qwen/qwen-image with input:', input);
+    console.log('Full model name: qwen/qwen-image');
     
-    const generationTime = Date.now() - startTime;
-    console.log('Generation completed in', generationTime, 'ms');
-    console.log('Raw output:', JSON.stringify(output, null, 2));
-    
-    // Handle empty response (credits issue)
-    if (Array.isArray(output) && output.length === 1 && 
-        typeof output[0] === 'object' && Object.keys(output[0]).length === 0) {
-      console.log('Empty object response detected');
+    let output;
+    try {
+      output = await replicate.run("qwen/qwen-image", { 
+        input,
+        stream: false
+      });
+    } catch (replicateError) {
+      console.error('Replicate API error:', replicateError);
       res.status(500).json({ 
-        error: 'Replicate returned empty object - check your account credits and billing at replicate.com',
-        debug_info: 'This usually means insufficient credits or billing issues'
+        error: 'Replicate API error: ' + replicateError.message,
+        model_used: 'qwen/qwen-image',
+        input_sent: input,
+        token_valid: token?.startsWith('r8_')
       });
       return;
     }
     
-    // Extract URL from response
-    let imageUrl;
+    console.log('Raw qwen output:', JSON.stringify(output, null, 2));
+    console.log('Output type:', typeof output);
+    console.log('Is array:', Array.isArray(output));
+    console.log('Output length:', Array.isArray(output) ? output.length : 'N/A');
+    
     if (Array.isArray(output) && output.length > 0) {
-      if (typeof output[0] === 'string') {
-        imageUrl = output[0];
+      console.log('First element:', output[0]);
+      console.log('First element type:', typeof output[0]);
+      console.log('First element keys:', typeof output[0] === 'object' ? Object.keys(output[0]) : 'N/A');
+    }
+    
+    // Check for empty response
+    if (Array.isArray(output) && output.length === 1 && 
+        typeof output[0] === 'object' && Object.keys(output[0]).length === 0) {
+      
+      // Try alternative model as fallback
+      console.log('Empty response from qwen, trying fallback model...');
+      try {
+        const fallbackOutput = await replicate.run("stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b", {
+          input: { 
+            prompt: prompt,
+            width: 2560,
+            height: 1440
+          },
+          stream: false
+        });
+        
+        if (Array.isArray(fallbackOutput) && fallbackOutput.length > 0 && typeof fallbackOutput[0] === 'string') {
+          console.log('Fallback model success:', fallbackOutput[0]);
+          res.status(200).json({ 
+            image_url: fallbackOutput[0],
+            generation_time: Date.now(),
+            model: "SDXL (fallback - qwen issue detected)",
+            debug: "qwen returned empty object, used SDXL fallback"
+          });
+          return;
+        }
+      } catch (fallbackError) {
+        console.error('Fallback model also failed:', fallbackError);
       }
+      
+      res.status(500).json({ 
+        error: 'Qwen model returning empty objects - possible model access or quota issue',
+        debug: {
+          output: output,
+          suggestion: 'Check Replicate dashboard for model access and quotas',
+          model_tried: 'qwen/qwen-image',
+          fallback_attempted: true
+        }
+      });
+      return;
+    }
+    
+    // Extract URL from successful response
+    let imageUrl;
+    if (Array.isArray(output) && output.length > 0 && typeof output[0] === 'string') {
+      imageUrl = output[0];
     }
     
     if (!imageUrl) {
-      console.log('No URL found in response');
       res.status(500).json({
         error: 'No valid image URL in response',
         debug: {
           output_type: typeof output,
-          output_length: Array.isArray(output) ? output.length : 'not_array',
-          raw_output: output
+          output: output,
+          model_used: 'qwen/qwen-image'
         }
       });
       return;
     }
 
     console.log('SUCCESS - Image URL:', imageUrl);
-    
-    const response = { 
+    res.status(200).json({ 
       image_url: imageUrl,
-      generation_time: generationTime,
+      generation_time: Date.now(),
       model: "Qwen Image AI"
-    };
-    
-    res.status(200).json(response);
+    });
 
   } catch (error) {
-    console.error("API Error:", error);
+    console.error("Handler error:", error);
     res.status(500).json({ 
       error: error.message,
-      error_type: error.name
+      error_type: error.name,
+      stack: error.stack
     });
   }
 }
