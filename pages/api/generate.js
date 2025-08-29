@@ -2,6 +2,13 @@
 import Replicate from "replicate";
 
 export default async function handler(req, res) {
+
+  // BEGIN LOGGING BLOCK (add this here!)
+  console.log('METHOD:', req.method);
+  console.log('PATH:', req.url);
+  console.log('HEADERS:', req.headers);
+  // END LOGGING BLOCK
+
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
