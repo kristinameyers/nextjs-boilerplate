@@ -2,12 +2,26 @@
 import Replicate from "replicate";
 
 export default async function handler(req, res) {
-  // BEGIN LOGGING BLOCK
+  // Comprehensive logging
+  console.log('=== REQUEST DEBUG ===');
   console.log('METHOD:', req.method);
-  console.log('PATH:', req.url);
-  console.log('HEADERS:', req.headers);
-  console.log('BODY:', req.body);
-  // END LOGGING BLOCK
+  console.log('RAW BODY:', req.body);
+  console.log('BODY TYPE:', typeof req.body);
+  console.log('BODY KEYS:', req.body ? Object.keys(req.body) : 'NO BODY');
+  
+  const { prompt: requestPrompt, steps: requestSteps } = req.body || {};
+  console.log('EXTRACTED PROMPT:', requestPrompt);
+  console.log('EXTRACTED STEPS:', requestSteps);
+  console.log('PROMPT TYPE:', typeof requestPrompt);
+  console.log('PROMPT LENGTH:', requestPrompt ? requestPrompt.length : 0);
+  
+  // Token verification
+  const token = process.env.REPLICATE_API_TOKEN;
+  console.log('TOKEN CHECK:', {
+    exists: !!token,
+    length: token ? token.length : 0,
+    starts_with_r8: token ? token.startsWith('r8_') : false
+  });
 
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -25,14 +39,13 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { prompt, steps } = req.body || {};
+    // Use hardcoded values for testing
+    const prompt = "a red apple on a table"; // Hardcoded
+    const steps = 20; // Hardcoded
+
+    console.log('USING HARDCODED VALUES');
+    console.log('Hardcoded prompt:', prompt);
     
-    if (!prompt) {
-      res.status(400).json({ error: "Prompt is required" });
-      return;
-    }
-    
-    const token = process.env.REPLICATE_API_TOKEN;
     if (!token) {
       res.status(500).json({ error: 'Replicate API token not configured' });
       return;
@@ -40,7 +53,6 @@ export default async function handler(req, res) {
     
     const replicate = new Replicate({ auth: token });
     
-    // Use SDXL for reliable high-resolution generation
     console.log('Calling SDXL model with prompt:', prompt);
     
     let output;
