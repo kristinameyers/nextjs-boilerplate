@@ -45,12 +45,14 @@ export default async function handler(req, res) {
     
     let output;
     try {
-      output = await replicate.run("stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b", {
-        input: { 
+      output = await replicate.run("stability-ai/sdxl:7762fd07cf82c948538e41f63f77d685e02b063e37e496e96eefd46c929f9bdc", {
+        input: {
           prompt: prompt,
-          width: 1024,  // Use standard resolution first
+          width: 1024,
           height: 1024,
-          num_inference_steps: Math.min(steps || 20, 50)
+          num_inference_steps: Math.min(steps || 20, 50),
+          guidance_scale: 7.5,
+          num_outputs: 1
         }
       });
     } catch (replicateError) {
