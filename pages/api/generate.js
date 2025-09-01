@@ -1,19 +1,13 @@
+// pages/api/generate.js
 import Replicate from "replicate";
 
 export default async function handler(req, res) {
+  // Comprehensive logging
   console.log('=== REQUEST DEBUG ===');
   console.log('METHOD:', req.method);
   console.log('RAW BODY:', req.body);
   console.log('BODY TYPE:', typeof req.body);
   console.log('BODY KEYS:', req.body ? Object.keys(req.body) : 'NO BODY');
-
-  // Token check
-  const token = process.env.REPLICATE_API_TOKEN;
-  console.log('TOKEN CHECK:', {
-    exists: !!token,
-    length: token ? token.length : 0,
-    starts_with_r8: token ? token.startsWith('r8_') : false
-  });
 
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -30,31 +24,47 @@ export default async function handler(req, res) {
     return;
   }
 
-  try {
-    // Hardcoded values for debugging
-    const prompt = "a red apple on a table";
-    const steps = 20;
+  // Extract prompt and steps from POST body
+  const { prompt, steps } = req.body || {};
+  console.log('EXTRACTED PROMPT:', prompt);
+  console.log('EXTRACTED STEPS:', steps);
 
-    if (!token) {
-      res.status(500).json({ error: 'Replicate API token not configured' });
-      return;
-    }
+  if (!prompt || typeof prompt !== "string" || prompt.trim().length < 3) {
+    res.status(400).json({ error: "Prompt is required and must be a string with at least 3 characters." });
+    return;
+  }
+
+  const token = process.env.REPLICATE_API_TOKEN;
+  console.log('TOKEN CHECK:', {
+    exists: !!token,
+    length: token ? token.length : 0,
+    starts_with_r8: token ? token.startsWith('r8_') : false
+  });
+
+  if (!token) {
+    res.status(500).json({ error: 'Replicate API token not configured' });
+    return;
+  }
+
+  try {
     const replicate = new Replicate({ auth: token });
 
-    console.log('Calling SDXL model with:', {prompt, steps});
+    // Choose reasonable defaults; you can adjust resolution as needed
+    const input = {
+      prompt: prompt.trim(),
+      width: 768,
+      height: 768,
+      num_inference_steps: Math.min(steps || 25, 50),
+      guidance_scale: 7.5,
+      num_outputs: 1,
+      apply_watermark: false
+    };
+
+    console.log('Calling SDXL model with:', input);
 
     let output;
     try {
-      output = await replicate.run("stability-ai/sdxl:7762fd07cf82c948538e41f63f77d685e02b063e37e496e96eefd46c929f9bdc", {
-        input: {
-          prompt,
-          width: 768,
-          height: 768,
-          num_inference_steps: steps,
-          guidance_scale: 7.5,
-          num_outputs: 1
-        }
-      });
+      output = await replicate.run("stability-ai/sdxl:7762fd07cf82c948538e41f63f77d685e02b063e37e496e96eefd46c929f9bdc", { input });
     } catch (replicateError) {
       console.error('Replicate API error:', replicateError);
       res.status(500).json({
@@ -66,23 +76,15 @@ export default async function handler(req, res) {
     }
 
     console.log('Raw SDXL output:', JSON.stringify(output, null, 2));
-
-    let imageUrl;
-    // Check if output is array of objects (with .url method) or plain array of URLs
-    if (Array.isArray(output) && output.length > 0) {
-      if (typeof output[0] === 'object' && output[0]?.url) {
-        imageUrl = output[0].url();
-      } else if (typeof output[0] === 'string') {
-        imageUrl = output[0];
-      }
-    }
+    // Handle output: SDXL usually returns array of image URLs as strings
+    let imageUrl = Array.isArray(output) && output.length > 0 && typeof output[0] === 'string' ? output[0] : null;
 
     if (!imageUrl) {
       res.status(500).json({
         error: 'No valid image URL in response',
         debug: {
           output_type: typeof output,
-          output,
+          output: output,
           model_used: 'stability-ai/sdxl'
         }
       });
