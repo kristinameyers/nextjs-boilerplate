@@ -29,8 +29,20 @@ export default async function handler(req, res) {
   console.log('EXTRACTED PROMPT:', prompt);
   console.log('EXTRACTED STEPS:', steps);
 
-  if (!prompt || typeof prompt !== "string" || prompt.trim().length < 3) {
-    res.status(400).json({ error: "Prompt is required and must be a string with at least 3 characters." });
+  // Validate user prompt
+  if (!prompt || typeof prompt !== "string") {
+    res.status(400).json({ error: "Prompt is required and must be a string." });
+    return;
+  }
+
+  const trimmedPrompt = prompt.trim();
+  if (trimmedPrompt.length < 3) {
+    res.status(400).json({ error: "Prompt must be at least 3 characters long." });
+    return;
+  }
+
+  if (trimmedPrompt.length > 500) {
+    res.status(400).json({ error: "Prompt must be less than 500 characters." });
     return;
   }
 
@@ -49,18 +61,20 @@ export default async function handler(req, res) {
   try {
     const replicate = new Replicate({ auth: token });
 
-    // Choose reasonable defaults; you can adjust resolution as needed
+    // Enhanced prompt for better wallpaper generation
+    const enhancedPrompt = `${trimmedPrompt}, high quality desktop wallpaper, detailed, cinematic lighting, vibrant colors`;
+
     const input = {
-      prompt: "a cat sitting on a beach during sunset",
-      // width: 768,
-      // height: 768,
+      prompt: enhancedPrompt,
+      width: 1024,
+      height: 1024,
       num_inference_steps: Math.min(steps || 25, 50),
-      // guidance_scale: 7.5,
+      guidance_scale: 7.5,
       num_outputs: 1,
-      // apply_watermark: false
+      apply_watermark: false
     };
 
-    console.log('Raw SDXL output:', input);
+    console.log('Calling SDXL model with:', input);
 
     let output;
     try {
@@ -76,8 +90,16 @@ export default async function handler(req, res) {
     }
 
     console.log('Raw SDXL output:', JSON.stringify(output, null, 2));
-    // Handle output: SDXL usually returns array of image URLs as strings
-    let imageUrl = Array.isArray(output) && output.length > 0 && typeof output[0] === 'string' ? output[0] : null;
+
+    // Handle different output formats
+    let imageUrl;
+    if (Array.isArray(output) && output.length > 0) {
+      if (typeof output[0] === 'string') {
+        imageUrl = output[0];
+      } else if (typeof output[0] === 'object' && output[0]?.url) {
+        imageUrl = output[0].url();
+      }
+    }
 
     if (!imageUrl) {
       res.status(500).json({
@@ -95,7 +117,8 @@ export default async function handler(req, res) {
     res.status(200).json({
       image_url: imageUrl,
       generation_time: Date.now(),
-      model: "Stable Diffusion XL"
+      model: "Stable Diffusion XL",
+      enhanced_prompt: enhancedPrompt
     });
 
   } catch (error) {
