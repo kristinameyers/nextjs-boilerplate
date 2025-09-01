@@ -89,17 +89,73 @@ export default async function handler(req, res) {
       return;
     }
 
+    console.log('=== OUTPUT ANALYSIS ===');
     console.log('Raw SDXL output:', JSON.stringify(output, null, 2));
-
-    // Handle different output formats
-    let imageUrl;
+    console.log('Output type:', typeof output);
+    console.log('Is array:', Array.isArray(output));
+    console.log('Output length:', Array.isArray(output) ? output.length : 'N/A');
+    
     if (Array.isArray(output) && output.length > 0) {
-      if (typeof output[0] === 'string') {
-        imageUrl = output[0];
-      } else if (typeof output[0] === 'object' && output[0]?.url) {
-        imageUrl = output[0].url();
+      console.log('First element type:', typeof output[0]);
+      console.log('First element:', output[0]);
+      
+      if (typeof output[0] === 'object') {
+        console.log('First element keys:', Object.keys(output[0]));
+        console.log('Has .url() method:', typeof output[0].url === 'function');
       }
     }
+
+    // Handle multiple possible output formats
+    let imageUrl = null;
+    
+    if (Array.isArray(output) && output.length > 0) {
+      const firstItem = output[0];
+      
+      // Format 1: Direct string URL
+      if (typeof firstItem === 'string') {
+        imageUrl = firstItem;
+        console.log('Found direct string URL:', imageUrl);
+      }
+      // Format 2: Object with .url() method
+      else if (typeof firstItem === 'object' && typeof firstItem.url === 'function') {
+        imageUrl = firstItem.url();
+        console.log('Found URL via .url() method:', imageUrl);
+      }
+      // Format 3: Object with url property
+      else if (typeof firstItem === 'object' && firstItem.url) {
+        imageUrl = firstItem.url;
+        console.log('Found URL via .url property:', imageUrl);
+      }
+      // Format 4: Object with image property
+      else if (typeof firstItem === 'object' && firstItem.image) {
+        imageUrl = firstItem.image;
+        console.log('Found URL via .image property:', imageUrl);
+      }
+      // Format 5: Nested array
+      else if (Array.isArray(firstItem) && firstItem.length > 0) {
+        if (typeof firstItem[0] === 'string') {
+          imageUrl = firstItem[0];
+          console.log('Found URL in nested array:', imageUrl);
+        }
+      }
+    }
+    // Format 6: Direct object (not array)
+    else if (typeof output === 'object' && output !== null) {
+      if (output.url) {
+        imageUrl = typeof output.url === 'function' ? output.url() : output.url;
+        console.log('Found URL in direct object:', imageUrl);
+      } else if (output.image) {
+        imageUrl = output.image;
+        console.log('Found image in direct object:', imageUrl);
+      }
+    }
+    // Format 7: Direct string
+    else if (typeof output === 'string') {
+      imageUrl = output;
+      console.log('Found direct string output:', imageUrl);
+    }
+
+    console.log('Final extracted imageUrl:', imageUrl);
 
     if (!imageUrl) {
       res.status(500).json({
@@ -107,7 +163,10 @@ export default async function handler(req, res) {
         debug: {
           output_type: typeof output,
           output: output,
-          model_used: 'stability-ai/sdxl'
+          model_used: 'stability-ai/sdxl',
+          is_array: Array.isArray(output),
+          array_length: Array.isArray(output) ? output.length : 'N/A',
+          first_element_type: Array.isArray(output) && output.length > 0 ? typeof output[0] : 'N/A'
         }
       });
       return;
