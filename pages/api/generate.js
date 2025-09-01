@@ -51,16 +51,16 @@ export default async function handler(req, res) {
 
     // Choose reasonable defaults; you can adjust resolution as needed
     const input = {
-      prompt: prompt.trim(),
-      width: 768,
-      height: 768,
+      prompt: "a cat sitting on a beach during sunset",
+      // width: 768,
+      // height: 768,
       num_inference_steps: Math.min(steps || 25, 50),
-      guidance_scale: 7.5,
+      // guidance_scale: 7.5,
       num_outputs: 1,
-      apply_watermark: false
+      // apply_watermark: false
     };
 
-    console.log('Calling SDXL model with:', input);
+    console.log('Raw SDXL output:', input);
 
     let output;
     try {
